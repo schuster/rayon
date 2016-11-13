@@ -10,6 +10,8 @@ extern crate rand;
 mod log;
 
 mod api;
+#[cfg(feature = "unstable")]
+mod atomic;
 mod caslist;
 mod latch;
 mod job;
@@ -28,5 +30,7 @@ pub use api::dump_stats;
 pub use api::initialize;
 pub use api::join;
 pub use api::ThreadPool;
+#[cfg(feature = "unstable")]
+pub use atomic::Atomic;
 #[cfg(feature = "unstable")]
 pub use scope::{scope, Scope};
