@@ -10,6 +10,7 @@ extern crate rand;
 mod log;
 
 mod api;
+mod caslist;
 mod latch;
 mod job;
 pub mod par_iter;
