@@ -46,6 +46,17 @@ pub fn global_registry() -> &'static Arc<Registry> {
     unsafe { THE_REGISTRY.unwrap() }
 }
 
+/// Gets a handle to the current registry. If we are in a worker, this
+/// is the worker's registry, otherwise its the global registry.
+pub fn current_registry() -> Arc<Registry> {
+    let worker = WorkerThread::current();
+    if worker.is_null() {
+        global_registry()
+    } else unsafe {
+        (*worker).registry().clone()
+    }
+}
+
 /// Starts the worker threads (if that has not already happened) with
 /// the given configuration.
 pub fn get_registry_with_config(config: Configuration) -> &'static Registry {

@@ -4,6 +4,8 @@
 extern crate deque;
 #[macro_use]
 extern crate lazy_static;
+#[cfg(feature = "unstable")]
+extern crate futures;
 extern crate libc;
 extern crate num_cpus;
 extern crate rand;
@@ -12,6 +14,7 @@ extern crate rand;
 mod log;
 
 mod api;
+mod future;
 mod latch;
 mod join;
 mod job;
