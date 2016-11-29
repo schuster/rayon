@@ -268,6 +268,7 @@ pub struct WorkerThread {
     /// A weak random number generator.
     rng: UnsafeCell<rand::XorShiftRng>,
 
+    registry: Arc<Registry>,
 }
 
 // This is a bit sketchy, but basically: the WorkerThread is
@@ -421,6 +422,7 @@ unsafe fn main_loop(worker: Worker<JobRef>, registry: Arc<Registry>, index: usiz
             "We assume this is not going to happen!");
 
     let worker_thread = WorkerThread {
+        registry: registry.clone(),
         worker: worker,
         stealers: stealers,
         index: index,
