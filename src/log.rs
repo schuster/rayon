@@ -1,5 +1,9 @@
 //! Debug Logging
+//!
+//! To use, toggle DUMP_LOGS to true and set the env var RAYON_RS_LOG.
+//! Do not commit with DUMP_LOGS = true!
 
+use std::env;
 use std::sync::atomic::{AtomicUsize, ATOMIC_USIZE_INIT};
 
 #[derive(Debug)]
@@ -23,11 +27,15 @@ pub enum Event {
     LostJob { worker: usize },
 }
 
-pub const DUMP_LOGS: bool = false;
+pub const DUMP_LOGS: bool = false; // DO NOT COMMIT CODE WHEN THIS IS TRUE
+
+lazy_static! {
+    pub static ref LOG_ENV: bool = env::var("RAYON_RS_LOG").is_ok();
+}
 
 macro_rules! log {
     ($event:expr) => {
-        if ::log::DUMP_LOGS { println!("{:?}", $event); }
+        if ::log::DUMP_LOGS { if *::log::LOG_ENV { println!("{:?}", $event); } }
     }
 }
 
