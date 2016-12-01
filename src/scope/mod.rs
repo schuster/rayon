@@ -1,3 +1,4 @@
+use futures::Future;
 use latch::{Latch, CountLatch};
 use job::{JobMode, HeapJob};
 use std::any::Any;
@@ -9,6 +10,7 @@ use thread_pool::{in_worker, WorkerThread};
 use unwind;
 
 mod future;
+use self::future::RayonFuture;
 
 #[cfg(test)]
 mod test;
@@ -262,6 +264,18 @@ impl<'scope> Scope<'scope> {
             let worker_thread = &*worker_thread;
             worker_thread.push(job_ref);
         }
+    }
+
+    pub fn spawn_future<F>(&self, future: F) -> RayonFuture<F::Item, F::Error>
+        where F: Future + Send + Sync + 'scope
+    {
+        self.job_completed_latch.increment();
+
+        // we assert that we have the future `F` type will remain
+        // valid until `job_completed_latch` is fully set
+        let future = unsafe { future::new_rayon_future(future, &self.job_completed_latch) };
+
+        future
     }
 
     /// Executes `func` as a job, either aborting or executing as
