@@ -14,7 +14,6 @@ extern crate rand;
 mod log;
 
 mod api;
-mod future;
 mod latch;
 mod join;
 mod job;
