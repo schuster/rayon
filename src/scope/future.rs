@@ -30,7 +30,9 @@ pub unsafe fn new_rayon_future<F>(future: F,
                                   -> RayonFuture<F::Item, F::Error>
     where F: Future + Send + Sync
 {
-    ScopeFuture::new(future, counter)
+    let (tx, rx) = channel();
+    ScopeFuture::spawn(future, tx, counter);
+    RayonFuture { receiver: rx }
 }
 
 impl<T, E> Future for RayonFuture<T, E> {
@@ -59,7 +61,7 @@ type CU<F> = CatchUnwind<AssertUnwindSafe<F>>;
 
 struct ScopeFutureContents<F: Future + Send + Sync> {
     spawn: Option<Spawn<CU<F>>>,
-    result: Poll<<CU<F> as Future>::Item, <CU<F> as Future>::Error>,
+    sender: Option<Sender<thread::Result<Result<F::Item, F::Error>>>>,
     unpark: Option<Arc<Unpark>>,
 
     // Pointer to ourselves. We `None` this out when we are finished
@@ -83,7 +85,9 @@ unsafe impl<F: Future + Send + Sync> Sync for ScopeFuture<F> {}
 impl<F: Future + Send + Sync> ScopeFuture<F> {
     // Unsafe: Caller asserts that `future` and `counter` will remain
     // valid until we invoke `counter.set()`.
-    unsafe fn new(future: F, counter: *const CountLatch) -> RayonFuture<F::Item, F::Error> {
+    unsafe fn spawn(future: F,
+                    sender: Sender<thread::Result<Result<F::Item, F::Error>>>,
+                    counter: *const CountLatch) {
         let worker_thread = WorkerThread::current();
         debug_assert!(!worker_thread.is_null());
 
@@ -99,7 +103,7 @@ impl<F: Future + Send + Sync> ScopeFuture<F> {
                 spawn: None,
                 unpark: None,
                 this: None,
-                result: Ok(Async::NotReady),
+                sender: Some(sender),
                 counter: counter,
             }),
         });
@@ -115,8 +119,6 @@ impl<F: Future + Send + Sync> ScopeFuture<F> {
         }
 
         future.ping();
-
-        future
     }
 
     /// Creates a `JobRef` from this job -- note that this hides all
@@ -174,7 +176,7 @@ impl<F: Future + Send + Sync> ScopeFuture<F> {
         }
     }
 
-    fn begin_execute(&self) {
+    fn begin_execute_state(&self) {
         // When we are put into the unparked state, we are enqueued in
         // a worker thread. We should then be executed exactly once,
         // at which point we transiition to STATE_EXECUTING. Nobody
@@ -185,7 +187,7 @@ impl<F: Future + Send + Sync> ScopeFuture<F> {
         debug_assert_eq!(result, Ok(STATE_UNPARKED));
     }
 
-    fn end_execute(&self) -> bool {
+    fn end_execute_state(&self) -> bool {
         loop {
             let state = self.state.load(Acquire);
             if state == STATE_EXECUTING {
@@ -214,14 +216,6 @@ impl<F: Future + Send + Sync> ScopeFuture<F> {
             }
         }
     }
-
-    fn complete(&self) {
-        let state = self.state.load(Acquire);
-        debug_assert!(state == STATE_EXECUTING || state == STATE_EXECUTING_UNPARKED,
-                      "cannot complete when not executing (state = {})",
-                      state);
-        self.state.store(STATE_COMPLETE, Release);
-    }
 }
 
 impl<F: Future + Send + Sync> Ping for ScopeFuture<F> {
@@ -239,28 +233,40 @@ impl<F: Future + Send + Sync> Job for ScopeFuture<F> {
         // and re-executed, before we have time to return from this fn
         let mut contents = this.contents.lock().unwrap();
 
-        // we should not yet have finished executing, so `unpark` should be `None`
-        let unpark = contents.unpark.take().unwrap();
-
-        this.begin_execute();
+        this.begin_execute_state();
         loop {
-            match contents.spawn.as_mut().unwrap().poll_future(unpark.clone()) {
+            match contents.poll() {
+                Ok(Async::Ready(v)) => {
+                    return contents.complete(Ok(v));
+                }
                 Ok(Async::NotReady) => {
-                    if this.end_execute() {
-                        contents.unpark = Some(unpark);
+                    if this.end_execute_state() {
                         return;
                     }
                 }
-                r => {
-                    // all finished, do not return `unpark`, assign
-                    // various fields, and set the state to
-                    // `STATE_COMPLETE`.
-                    contents.this = None;
-                    contents.result = r;
-                    this.complete();
+                Err(err) => {
+                    return contents.complete(Err(err));
                 }
             }
         }
+    }
+}
+
+impl<F: Future + Send + Sync> ScopeFutureContents<F> {
+    fn poll(&mut self) -> Poll<<CU<F> as Future>::Item, <CU<F> as Future>::Error> {
+        let unpark = self.unpark.clone().unwrap();
+        self.spawn.as_mut().unwrap().poll_future(unpark)
+    }
+
+    fn complete(&mut self, value: thread::Result<Result<F::Item, F::Error>>) {
+        self.unpark = None;
+        self.sender.take().unwrap().complete(value);
+        let this = self.this.take().unwrap();
+        let state = this.state.load(Acquire);
+        debug_assert!(state == STATE_EXECUTING || state == STATE_EXECUTING_UNPARKED,
+                      "cannot complete when not executing (state = {})",
+                      state);
+        this.state.store(STATE_COMPLETE, Release);
     }
 }
 
