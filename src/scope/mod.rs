@@ -8,6 +8,8 @@ use std::sync::atomic::{AtomicPtr, Ordering};
 use thread_pool::{in_worker, WorkerThread};
 use unwind;
 
+mod future;
+
 #[cfg(test)]
 mod test;
 

@@ -49,11 +49,13 @@ pub fn global_registry() -> &'static Arc<Registry> {
 /// Gets a handle to the current registry. If we are in a worker, this
 /// is the worker's registry, otherwise its the global registry.
 pub fn current_registry() -> Arc<Registry> {
-    let worker = WorkerThread::current();
-    if worker.is_null() {
-        global_registry()
-    } else unsafe {
-        (*worker).registry().clone()
+    unsafe {
+        let worker = WorkerThread::current();
+        if worker.is_null() {
+            global_registry().clone()
+        } else {
+            (*worker).registry.clone()
+        }
     }
 }
 
